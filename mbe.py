@@ -26,13 +26,11 @@ Prerequisites
 
 Usage
 -----
->>> python mbe_orca.py cluster.xyz --order 3 --method "ri-mp2 def2-svp" \
+>>> python mbe.py cluster.xyz --order 3 --method "ri-mp2 def2-svp" \
         --charge 0 --multiplicity 1 --nprocs 8 --scratch /tmp/orca_scratch
 
-See ``python mbe_orca.py -h`` for full help.
+See ``python mbe.py -h`` for full help.
 """
-from __future__ import annotations
-
 import argparse
 import itertools
 import json
@@ -45,7 +43,7 @@ import textwrap
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple, Optional
 
 import numpy as np
 
@@ -142,13 +140,15 @@ def run_orca(inp: Path, timeout: int = 86400) -> float:
         except Fatal:
             print(f"[recompute] Energy not found in {out}")
     cmd = [ORCA_CMD, inp.name]
-    with subprocess.Popen(cmd, cwd=inp.parent, stdout=subprocess.PIPE,
-                          stderr=subprocess.STDOUT, text=True) as proc:
-        try:
-            proc.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            raise Fatal(f"ORCA job timeout: {inp}")
+    # redirect ORCA stdout into the .out file so parse_energy can find it
+    with out.open("w") as fh:
+        with subprocess.Popen(cmd, cwd=inp.parent, stdout=fh,
+                          stderr=subprocess.STDOUT, universal_newlines=True) as proc:
+            try:
+                proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                raise Fatal(f"ORCA job timeout: {inp}")
     return parse_energy(out)
 
 
@@ -162,7 +162,7 @@ def parse_energy(out_path: Path) -> float:
 
 
 ###############################################################################
-#                          MBE bookkeeping                                    #
+#                             MBE bookkeeping                                 #
 ###############################################################################
 
 def recursive_delta(energies: Dict[Tuple[int, ...], float], order: int) -> Dict[Tuple[int, ...], float]:
@@ -183,20 +183,26 @@ def proper_subsets(t: Tuple[int, ...]):
 
 
 ###############################################################################
-#                         Main workflow                                      #
+#                             Main workflow                                   #
 ###############################################################################
 
-def main(argv: Sequence[str] | None = None):
+def main(argv: Optional[Sequence[str]] = None):
     p = argparse.ArgumentParser(description="Many-Body Expansion driver (ORCA)")
     p.add_argument("xyz", type=Path, help="Input cluster .xyz file")
     p.add_argument("--order", "-n", type=int, default=3, help="MBE order (default=3)")
     p.add_argument("--method", type=str, default="HF 6-31G*", help="ORCA method/basis line")
     p.add_argument("--charge", type=int, default=0)
     p.add_argument("--multiplicity", type=int, default=1)
-    p.add_argument("--nprocs", type=int, default=os.cpu_count() or 4, help="Parallel workers")
+    p.add_argument("--nprocs", type=int, default=os.cpu_count() or 1, help="Parallel workers")
     p.add_argument("--scratch", type=Path, default=Path("_mbe_tmp"), help="Scratch directory")
     p.add_argument("--fragments", type=Path, help="JSON file specifying list of fragments (indices)")
+    p.add_argument("--orca-path", type=str, default=os.environ.get("ORCA_PATH", "orca"), help="Path to the ORCA executable")
+
     args = p.parse_args(argv)
+
+    # Override the global ORCA_CMD with the user‐supplied path
+    global ORCA_CMD
+    ORCA_CMD = args.orca_path
 
     sym, xyz = read_xyz(args.xyz)
     if args.fragments:
@@ -233,13 +239,12 @@ def main(argv: Sequence[str] | None = None):
     delta = recursive_delta(energies, args.order)
     E_total = sum(delta.values())
 
-    print("\nMBE ENERGY BREAKDOWN (Hartree)")
+    print("\nMBE ENERGY BREAKDOWN")
     for k in range(1, args.order + 1):
         term = sum(delta[c] for c in delta if len(c) == k)
-        print(f"ΔE{k} = {term: .10f} Ha   ({term*627.509:.4f} kcal/mol)")
+        print(f"ΔE{k} = {term: .10f} Ha   ({term*627.509474:.4f} kcal/mol)")
     print("-"*60)
-    print(f"TOTAL E(MBE{args.order}) = {E_total: .10f} Ha   ({E_total*627.509:.4f} kcal/mol)")
-
+    print(f"TOTAL E(MBE{args.order}) = {E_total: .10f} Ha   ({E_total*627.509474:.4f} kcal/mol)")
 
 if __name__ == "__main__":
     try:
@@ -247,3 +252,4 @@ if __name__ == "__main__":
     except Fatal as e:
         print("ERROR:", e, file=sys.stderr)
         sys.exit(1)
+        
