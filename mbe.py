@@ -48,9 +48,7 @@ from typing import Dict, List, Sequence, Tuple, Optional
 import numpy as np
 
 ################################################################################
-#                                                                              #
 #                                 Utilities                                    #
-#                                                                              #
 ################################################################################
 
 EXT = {"xyz": "xyz", "inp": "inp", "out": "out"}
@@ -123,15 +121,15 @@ def write_orca_input(sym: List[str], xyz: np.ndarray, sel: Sequence[int], method
                       charge: int, mult: int, path: Path):
     """Create ORCA *.inp file for selected fragment indices."""
     with path.open("w") as fh:
-        fh.write(f"! {method}\n")
+        fh.write(f"!{method}\n")
         fh.write("%pal nprocs 1 end\n")
-        fh.write(f"* xyz {charge} {mult}\n")
+        fh.write(f"*xyz {charge} {mult}\n")
         for i in sel:
             fh.write(f"{sym[i]} {xyz[i,0]:.8f} {xyz[i,1]:.8f} {xyz[i,2]:.8f}\n")
         fh.write("*\n")
 
 
-def run_orca(inp: Path, timeout: int = 86400) -> float:
+def run_orca(inp: Path, timeout: int = 3600) -> float:
     """Run ORCA and return FINAL SINGLE POINT ENERGY (Hartree)."""
     out = inp.with_suffix("." + EXT["out"])
     if out.exists():
@@ -239,12 +237,27 @@ def main(argv: Optional[Sequence[str]] = None):
     delta = recursive_delta(energies, args.order)
     E_total = sum(delta.values())
 
-    print("\nMBE ENERGY BREAKDOWN")
+    # write MBE energies to a “.mbe” file alongside the input
+    out_path = args.xyz.with_suffix(".mbe")
+    with out_path.open("w") as mbef:
+        mbef.write("MBE ENERGY BREAKDOWN\n")
+        for k in range(1, args.order + 1):
+            term = sum(delta[c] for c in delta if len(c) == k)
+            mbef.write(f"ΔE{k} = {term:.10f} Ha   ({term * 627.509474:.4f} kcal/mol)\n")
+        mbef.write("-" * 60 + "\n")
+        for i in range(1, args.order + 1):
+            cum = sum(term for c, term in delta.items() if len(c) <= i)
+            mbef.write(f"TOTAL E(MBE{i}) = {cum:.10f} Ha   ({cum * 627.509474:.4f} kcal/mol)\n")
+        #mbef.write(f"TOTAL E(MBE{args.order}) = {E_total:.10f} Ha   ({E_total * 627.509474:.4f} kcal/mol)\n")
+        print("\nMBE ENERGY BREAKDOWN")
+
     for k in range(1, args.order + 1):
         term = sum(delta[c] for c in delta if len(c) == k)
         print(f"ΔE{k} = {term: .10f} Ha   ({term*627.509474:.4f} kcal/mol)")
     print("-"*60)
-    print(f"TOTAL E(MBE{args.order}) = {E_total: .10f} Ha   ({E_total*627.509474:.4f} kcal/mol)")
+    print(f"TOTAL E(MBE{args.order}) = {E_total: .10f} Ha   ({E_total*627.509474:.4f} kcal/mol)\n")
+
+    print(f"Results written to {out_path}")
 
 if __name__ == "__main__":
     try:
@@ -252,4 +265,3 @@ if __name__ == "__main__":
     except Fatal as e:
         print("ERROR:", e, file=sys.stderr)
         sys.exit(1)
-        
