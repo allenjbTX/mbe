@@ -27,7 +27,8 @@ Prerequisites
 Usage
 -----
 >>> python mbe.py cluster.xyz --order 3 --method "ri-mp2 def2-svp" \
-        --charge 0 --multiplicity 1 --nprocs 8 --scratch /tmp/orca_scratch
+        --charge 0 --multiplicity 1 --nprocs 8 --scratch /tmp/orca_scratch \
+        --orca-path /path/to/orca
 
 See ``python mbe.py -h`` for full help.
 """
@@ -121,7 +122,7 @@ def write_orca_input(sym: List[str], xyz: np.ndarray, sel: Sequence[int], method
                       charge: int, mult: int, path: Path):
     """Create ORCA *.inp file for selected fragment indices."""
     with path.open("w") as fh:
-        fh.write(f"!{method}\n")
+        fh.write(f"!{method} EnGrad\n")
         fh.write("%pal nprocs 1 end\n")
         fh.write(f"*xyz {charge} {mult}\n")
         for i in sel:
@@ -237,7 +238,7 @@ def main(argv: Optional[Sequence[str]] = None):
     delta = recursive_delta(energies, args.order)
     E_total = sum(delta.values())
 
-    # write MBE energies to a “.mbe” file alongside the input
+    # write MBE energies to a “.mbe” file
     out_path = args.xyz.with_suffix(".mbe")
     with out_path.open("w") as mbef:
         mbef.write("MBE ENERGY BREAKDOWN\n")
