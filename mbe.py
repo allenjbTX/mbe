@@ -160,6 +160,38 @@ def parse_energy(out_path: Path) -> float:
     raise Fatal("Energy line not found in {}".format(out_path))
 
 
+def parse_engrad_file(path: Path) -> np.ndarray:
+    """Extract gradient (Eh/bohr) from ORCA .engrad file as array shape (n_atoms,3)."""
+    with path.open() as f:
+        natm = None
+        gradients = []
+        # first find number of atoms
+        for line in f:
+            if "Number of atoms" in line:
+                # next non-comment numeric line is natm
+                while True:
+                    line2 = next(f)
+                    if line2.strip() and not line2.strip().startswith('#'):
+                        natm = int(line2.strip())
+                        break
+                break
+        if natm is None:
+            raise Fatal(f"Cannot find atom count in {path}")
+        # find gradient block
+        for line in f:
+            if "current gradient" in line:
+                # read 3*natm float lines
+                count = 3 * natm
+                while len(gradients) < count:
+                    line3 = next(f)
+                    if line3.strip() and not line3.strip().startswith('#'):
+                        gradients.append(float(line3.strip()))
+                break
+        if len(gradients) != 3 * natm:
+            raise Fatal(f"Unexpected gradient entries in {path}")
+        return np.array(gradients).reshape(natm, 3)
+
+
 ###############################################################################
 #                             MBE bookkeeping                                 #
 ###############################################################################
@@ -174,6 +206,19 @@ def recursive_delta(energies: Dict[Tuple[int, ...], float], order: int) -> Dict[
             subtotal = sum(delta[sub] for sub in proper_subsets(combo) if sub in delta)
             delta[combo] = energies[combo] - subtotal
     return delta
+
+
+def recursive_delta_vector(gradients: Dict[Tuple[int, ...], np.ndarray], order: int) -> Dict[Tuple[int, ...], np.ndarray]:
+    """Compute non-redundant Δ gradient arrays for all subsets up to order."""
+    delta_g: Dict[Tuple[int, ...], np.ndarray] = {}
+    max_idx = max(idx for combo in gradients for idx in combo)
+    for k in range(1, order + 1):
+        for combo in itertools.combinations(range(max_idx + 1), k):
+            if combo not in gradients:
+                continue
+            subtotal = sum(delta_g[sub] for sub in proper_subsets(combo) if sub in delta_g)
+            delta_g[combo] = gradients[combo] - subtotal
+    return delta_g
 
 
 def proper_subsets(t: Tuple[int, ...]):
@@ -216,6 +261,7 @@ def main(argv: Optional[Sequence[str]] = None):
     workdir.mkdir(exist_ok=True, parents=True)
 
     energies: Dict[Tuple[int, ...], float] = {}
+    grads: Dict[Tuple[int, ...], np.ndarray] = {}
     combos = generate_combinations(n_frag, args.order)
 
     def _submit(combo):
@@ -225,18 +271,29 @@ def main(argv: Optional[Sequence[str]] = None):
         sel_atoms = [idx for frag_idx in combo for idx in frags[frag_idx]]
         write_orca_input(sym, xyz, sel_atoms, args.method, args.charge, args.multiplicity, inp)
         E = run_orca(inp)
-        return combo, E
+        # parse fragment gradient
+        eng = subdir / "frag.engrad"
+        Gfrag = parse_engrad_file(eng)
+        # map to full array
+        Gfull = np.zeros((len(sym), 3))
+        for i, a in enumerate(sel_atoms):
+            Gfull[a] = Gfrag[i]
+        return combo, E, Gfull
 
     with ThreadPoolExecutor(max_workers=args.nprocs) as pool:
         futures = {pool.submit(_submit, c): c for c in combos}
         for fut in as_completed(futures):
-            combo, E = fut.result()
+            combo, E, G = fut.result()
             energies[combo] = E
+            grads[combo] = G
             combo_str = "(" + ",".join(str(i) for i in combo) + ")"
             print(f"done {combo_str:>15s}  {E: .8f} Ha")
 
     delta = recursive_delta(energies, args.order)
     E_total = sum(delta.values())
+    # compute MBE gradient
+    delta_g = recursive_delta_vector(grads, args.order)
+    total_grad = sum(delta_g.values())
 
     # write MBE energies to a “.mbe” file
     out_path = args.xyz.with_suffix(".mbe")
@@ -259,6 +316,14 @@ def main(argv: Optional[Sequence[str]] = None):
     print(f"TOTAL E(MBE{args.order}) = {E_total: .10f} Ha   ({E_total*627.509474:.4f} kcal/mol)\n")
 
     print(f"Results written to {out_path}")
+    # write total MBE gradient
+    gpath = args.xyz.with_suffix('.mbegrad')
+    with gpath.open('w') as gf:
+        gf.write('# Atom_index Symbol Grad_x(Eh/bohr) Grad_y Grad_z\n')
+        for i, symb in enumerate(sym):
+            gx, gy, gz = total_grad[i]
+            gf.write(f"{i} {symb} {gx:.10f} {gy:.10f} {gz:.10f}\n")
+    print(f"MBE gradient written to {gpath}")
 
 if __name__ == "__main__":
     try:
