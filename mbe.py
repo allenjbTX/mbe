@@ -118,12 +118,14 @@ def generate_combinations(n_frag: int, order: int) -> List[Tuple[int, ...]]:
 ORCA_CMD = os.environ.get("ORCA_PATH", "orca")
 
 
-def write_orca_input(sym: List[str], xyz: np.ndarray, sel: Sequence[int], method: str,
-                      charge: int, mult: int, path: Path):
+def write_orca_input(sym, xyz, sel, method, charge, mult, path,
+                     pointcharge_file: Optional[Path] = None):
     """Create ORCA *.inp file for selected fragment indices."""
     with path.open("w") as fh:
         fh.write(f"!{method} EnGrad\n")
         fh.write("%pal nprocs 1 end\n")
+        if pointcharge_file:
+            fh.write(f"%pointcharges \"{pointcharge_file.name}\"\n")
         fh.write(f"*xyz {charge} {mult}\n")
         for i in sel:
             fh.write(f"{sym[i]} {xyz[i,0]:.8f} {xyz[i,1]:.8f} {xyz[i,2]:.8f}\n")
@@ -237,6 +239,11 @@ def main(argv: Optional[Sequence[str]] = None):
     p.add_argument("--method", type=str, default="HF 6-31G*", help="ORCA method/basis line")
     p.add_argument("--charge", type=int, default=0)
     p.add_argument("--multiplicity", type=int, default=1)
+    p.add_argument("--pointcharges", type=Path,
+                   help=("External point-charge file; first line = integer "
+                         "count, remaining lines = q x y z.  "
+                         "File name will be forwarded to ORCA via "
+                         '`% pointcharges \"file.pc\"`.'))
     p.add_argument("--nprocs", type=int, default=os.cpu_count() or 1, help="Parallel workers")
     p.add_argument("--scratch", type=Path, default=Path("_mbe_tmp"), help="Scratch directory")
     p.add_argument("--fragments", type=Path,
@@ -253,6 +260,17 @@ def main(argv: Optional[Sequence[str]] = None):
     ORCA_CMD = args.orca_path
 
     sym, xyz = read_xyz(args.xyz)
+
+    # ------------------------------------------------------------------
+    # 0.  Optional external point-charge array
+    # ------------------------------------------------------------------
+    pointcharge_file: Optional[Path] = None
+    if args.pointcharges:
+        # quick sanity-check: header must be an int
+        first = args.pointcharges.read_text().splitlines()[0].strip()
+        if not first.isdigit():
+            raise Fatal(f"{args.pointcharges}: first line must be an integer (#charges)")
+        pointcharge_file = args.pointcharges
 
     # ---------------------------------------------------------------------
     # 1.  Fragment definition & charge parsing
@@ -299,7 +317,8 @@ def main(argv: Optional[Sequence[str]] = None):
         sub_charge = sum(frag_charges[frag_idx] for frag_idx in combo)
 
         write_orca_input(sym, xyz, sel_atoms,
-                         args.method, sub_charge, args.multiplicity, inp)
+                         args.method, sub_charge, args.multiplicity,
+                         inp, pointcharge_file)
         E = run_orca(inp)
         # parse fragment gradient
         eng = subdir / "frag.engrad"
