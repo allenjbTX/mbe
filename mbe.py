@@ -239,7 +239,11 @@ def main(argv: Optional[Sequence[str]] = None):
     p.add_argument("--multiplicity", type=int, default=1)
     p.add_argument("--nprocs", type=int, default=os.cpu_count() or 1, help="Parallel workers")
     p.add_argument("--scratch", type=Path, default=Path("_mbe_tmp"), help="Scratch directory")
-    p.add_argument("--fragments", type=Path, help="JSON file specifying list of fragments (indices)")
+    p.add_argument("--fragments", type=Path,
+                   help=("JSON file with fragment definitions.  "
+                         "Allowed formats:\n"
+                         "  • list[list[int]]                       -> charge 0 for every fragment\n"
+                         "  • list[{\"atoms\": [...], \"charge\": q}] -> arbitrary charges"))
     p.add_argument("--orca-path", type=str, default=os.environ.get("ORCA_PATH", "orca"), help="Path to the ORCA executable")
 
     args = p.parse_args(argv)
@@ -249,10 +253,29 @@ def main(argv: Optional[Sequence[str]] = None):
     ORCA_CMD = args.orca_path
 
     sym, xyz = read_xyz(args.xyz)
+
+    # ---------------------------------------------------------------------
+    # 1.  Fragment definition & charge parsing
+    # ---------------------------------------------------------------------
+    frag_charges: List[int]
     if args.fragments:
-        frags = json.loads(args.fragments.read_text())
+        raw = json.loads(args.fragments.read_text())
+        # a) list[dict]  → {'atoms':[...], 'charge':q}
+        if (isinstance(raw, list)
+                and len(raw) > 0
+                and all(isinstance(f, dict) for f in raw)):
+            frags       = [f["atoms"]  for f in raw]
+            frag_charges = [int(f.get("charge", 0)) for f in raw]
+        # b) simple list[list[int]]
+        elif isinstance(raw, list) and all(isinstance(f, list) for f in raw):
+            frags        = raw
+            frag_charges = [0]*len(frags)
+        else:
+            raise Fatal("--fragments JSON must be a list of lists "
+                        "or a list of {'atoms','charge'} objects")
     else:
-        frags = detect_water_fragments(sym, xyz)
+        frags        = detect_water_fragments(sym, xyz)
+        frag_charges = [0]*len(frags)
     n_frag = len(frags)
     if args.order > n_frag:
         raise Fatal("MBE order cannot exceed number of fragments")
@@ -268,8 +291,15 @@ def main(argv: Optional[Sequence[str]] = None):
         subdir = workdir / ("_".join(map(str, combo)))
         subdir.mkdir(exist_ok=True)
         inp = subdir / f"frag.inp"
-        sel_atoms = [idx for frag_idx in combo for idx in frags[frag_idx]]
-        write_orca_input(sym, xyz, sel_atoms, args.method, args.charge, args.multiplicity, inp)
+        sel_atoms  = [idx for frag_idx in combo for idx in frags[frag_idx]]
+
+        # -----------------------------------------------------------------
+        # 2.   Sub-system charge = sum of the constituent fragment charges
+        # -----------------------------------------------------------------
+        sub_charge = sum(frag_charges[frag_idx] for frag_idx in combo)
+
+        write_orca_input(sym, xyz, sel_atoms,
+                         args.method, sub_charge, args.multiplicity, inp)
         E = run_orca(inp)
         # parse fragment gradient
         eng = subdir / "frag.engrad"
@@ -323,7 +353,7 @@ def main(argv: Optional[Sequence[str]] = None):
         for i, symb in enumerate(sym):
             gx, gy, gz = total_grad[i]
             gf.write(f"{i} {symb} {gx:.10f} {gy:.10f} {gz:.10f}\n")
-    print(f"MBE gradient written to {gpath}")
+    print(f"MBE({args.order}) gradient written to {gpath}")
 
 if __name__ == "__main__":
     try:
