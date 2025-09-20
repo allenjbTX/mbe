@@ -124,6 +124,7 @@ def write_orca_input(sym, xyz, sel, method, charge, mult, path,
     with path.open("w") as fh:
         fh.write(f"!{method} EnGrad\n")
         fh.write("%pal nprocs 1 end\n")
+        # fh.write("%maxcore 1500\n")
         if pointcharge_file:
             fh.write(f"%pointcharges \"{pointcharge_file.name}\"\n")
         fh.write(f"*xyz {charge} {mult}\n")
