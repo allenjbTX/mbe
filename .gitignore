@@ -1,0 +1,5 @@
+
+# MBE generated outputs and scratch
+tests/**/_mbe_tmp/
+*.mbe
+*.mbegrad
