@@ -366,14 +366,19 @@ def main(argv: Optional[Sequence[str]] = None):
     print(f"TOTAL E(MBE{args.order}) = {E_total: .10f} Ha   ({E_total*627.509474:.4f} kcal/mol)\n")
 
     print(f"Results written to {out_path}")
-    # write total MBE gradient
+    # write MBE gradients for all orders
     gpath = args.xyz.with_suffix('.mbegrad')
     with gpath.open('w') as gf:
-        gf.write('# Atom_index Symbol Grad_x(Eh/bohr) Grad_y Grad_z\n')
-        for i, symb in enumerate(sym):
-            gx, gy, gz = total_grad[i]
-            gf.write(f"{i} {symb} {gx:.10f} {gy:.10f} {gz:.10f}\n")
-    print(f"MBE({args.order}) gradient written to {gpath}")
+        for order in range(1, args.order + 1):
+            # Calculate gradient for this specific order (cumulative up to order)
+            order_grad = sum(term for c, term in delta_g.items() if len(c) <= order)
+            gf.write(f'# MBE({order}) Gradient - Atom_index Symbol Grad_x(Eh/bohr) Grad_y Grad_z\n')
+            for i, symb in enumerate(sym):
+                gx, gy, gz = order_grad[i]
+                gf.write(f"{i} {symb} {gx:.10f} {gy:.10f} {gz:.10f}\n")
+            if order < args.order:  # Add separator between orders (except for last)
+                gf.write('\n')
+    print(f"MBE gradients for orders 1-{args.order} written to {gpath}")
 
 if __name__ == "__main__":
     try:

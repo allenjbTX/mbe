@@ -1,4 +1,4 @@
-!HF 6-31G* EnGrad
+!HF STO-3G EnGrad
 %pal nprocs 1 end
 *xyz 0 1
 O 21.99613000 48.36911000 43.54199000
