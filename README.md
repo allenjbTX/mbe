@@ -107,13 +107,3 @@ Fragments with per-fragment charges:
 The `tests/` folder contains example clusters and a populated `_mbe_tmp/`
 tree produced by a prior run which can be used as a reference for expected
 output layout.
-
-## License & contributions
-
-Refer to the repository owner for license and contribution policies.
-
----
-
-For troubleshooting or to request a feature (parallelism, different
-fragmentation heuristics, better error handling), open an issue or send a
-description of the desired behavior with an example input.
