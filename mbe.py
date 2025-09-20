@@ -95,6 +95,10 @@ def detect_water_fragments(symbols: List[str], xyz: np.ndarray) -> List[List[int
         d2 = np.linalg.norm(xyz[hydrogens] - xyz[o], axis=1)
         nearest = np.argsort(d2)[:2]
         hs = [hydrogens[i] for i in nearest if d2[i] < 1.2]
+        # Ensure deterministic ordering of hydrogens within fragment matching
+        # the global atom index order. Without this, gradients can appear with
+        # H atoms swapped relative to the original XYZ ordering.
+        hs = sorted(hs)
         if len(hs) != 2:
             raise Fatal("Failed to assign two H atoms to oxygen {}".format(o))
         if any(h in taken for h in hs):
@@ -341,9 +345,14 @@ def main(argv: Optional[Sequence[str]] = None):
 
     delta = recursive_delta(energies, args.order)
     E_total = sum(delta.values())
-    # compute MBE gradient
+    # compute MBE gradient (non-redundant Δg for each subsystem)
     delta_g = recursive_delta_vector(grads, args.order)
+    # cumulative total gradient at final order
     total_grad = sum(delta_g.values())
+    # Pre-compute cumulative gradients for each intermediate order k
+    cumulative_grad_by_order = {}
+    for k in range(1, args.order + 1):
+        cumulative_grad_by_order[k] = sum(g for c, g in delta_g.items() if len(c) <= k)
 
     # write MBE energies to a “.mbe” file
     out_path = args.xyz.with_suffix(".mbe")
@@ -366,14 +375,23 @@ def main(argv: Optional[Sequence[str]] = None):
     print(f"TOTAL E(MBE{args.order}) = {E_total: .10f} Ha   ({E_total*627.509474:.4f} kcal/mol)\n")
 
     print(f"Results written to {out_path}")
-    # write total MBE gradient
+    # write MBE gradients for every order up to the requested one
+    # File format: blocks labeled ORDER k with per-atom cumulative gradient up to that order
     gpath = args.xyz.with_suffix('.mbegrad')
     with gpath.open('w') as gf:
-        gf.write('# Atom_index Symbol Grad_x(Eh/bohr) Grad_y Grad_z\n')
-        for i, symb in enumerate(sym):
-            gx, gy, gz = total_grad[i]
-            gf.write(f"{i} {symb} {gx:.10f} {gy:.10f} {gz:.10f}\n")
-    print(f"MBE({args.order}) gradient written to {gpath}")
+        gf.write('# Many-Body Expansion Gradients\n')
+        gf.write(f'# Source XYZ: {args.xyz.name}\n')
+        gf.write(f'# Method: {args.method}\n')
+        gf.write(f'# Orders: 1..{args.order}\n')
+        gf.write('# Each block is the cumulative gradient up to (and including) order k.\n')
+        for k in range(1, args.order + 1):
+            gf.write(f'\n# ---- ORDER {k} (cumulative) ----\n')
+            gf.write('# Atom_index Symbol Grad_x(Eh/bohr) Grad_y Grad_z\n')
+            Gk = cumulative_grad_by_order[k]
+            for i, symb in enumerate(sym):
+                gx, gy, gz = Gk[i]
+                gf.write(f"{i} {symb} {gx:.10f} {gy:.10f} {gz:.10f}\n")
+    print(f"MBE(1..{args.order}) gradients written to {gpath}")
 
 if __name__ == "__main__":
     try:
