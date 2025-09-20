@@ -244,7 +244,7 @@ def main(argv: Optional[Sequence[str]] = None):
                    help=("External point-charge file; first line = integer "
                          "count, remaining lines = q x y z.  "
                          "File name will be forwarded to ORCA via "
-                         '`% pointcharges \"file.pc\"`.'))
+                         '`%% pointcharges \"file.pc\"`.'))
     p.add_argument("--nprocs", type=int, default=os.cpu_count() or 1, help="Parallel workers")
     p.add_argument("--scratch", type=Path, default=Path("_mbe_tmp"), help="Scratch directory")
     p.add_argument("--fragments", type=Path,
