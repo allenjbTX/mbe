@@ -132,7 +132,11 @@ def write_orca_input(sym, xyz, sel, method, charge, mult, path,
         if pointcharge_file:
             fh.write(f"%pointcharges \"{pointcharge_file.name}\"\n")
         if method.lower() in ['xtb0', 'xtb1', 'xtb2', 'gfn0-xtb', 'gfn1-xtb', 'gfn2-xtb']:
-            fh.write("%xtb etemp 0 end\n")
+            fh.write("%xtb\n")
+            fh.write("     etemp 0\n")
+            fh.write('     accuracy 1000\n')
+            fh.write('     xtbinputstring "--iterations 1000"\n')
+            fh.write("end\n")
         fh.write(f"*xyz {charge} {mult}\n")
         for i in sel:
             fh.write(f"{sym[i]} {xyz[i,0]:.8f} {xyz[i,1]:.8f} {xyz[i,2]:.8f}\n")
