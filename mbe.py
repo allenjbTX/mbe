@@ -263,6 +263,7 @@ def main(argv: Optional[Sequence[str]] = None):
                          "  • list[list[int]]                       -> charge 0 for every fragment\n"
                          "  • list[{\"atoms\": [...], \"charge\": q}] -> arbitrary charges"))
     p.add_argument("--orca-path", type=str, default=os.environ.get("ORCA_PATH", "orca"), help="Path to the ORCA executable")
+    p.add_argument("--ee", type=bool, default=False, help="Use electrostatic embedding (not implemented)")
 
     args = p.parse_args(argv)
 
