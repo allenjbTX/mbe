@@ -1,0 +1,59 @@
+diff --git a/mbe.py b/mbe.py
+--- a/mbe.py
++++ b/mbe.py
+@@ -10,7 +10,10 @@
+-    p.add_argument("--charge", type=int, default=0)
++    # --charge kept for backward-compatibility but *ignored* when per-fragment
++    # charges are supplied in --fragments JSON.
++    p.add_argument("--charge", type=int, default=0)
+
+-    p.add_argument("--fragments", type=Path, help="JSON file specifying list of fragments (indices)")
++    p.add_argument("--fragments", type=Path,
++                   help=("JSON file with fragment definitions.  "
++                         "Allowed formats:\n"
++                         "  • list[list[int]]                       -> charge 0 for every fragment\n"
++                         "  • list[{\"atoms\": [...], \"charge\": q}] -> arbitrary charges"))
+
+@@ -24,7 +33,18 @@
+-    sym, xyz = read_xyz(args.xyz)
+-    if args.fragments:
+-        frags = json.loads(args.fragments.read_text())
+-    else:
+-        frags = detect_water_fragments(sym, xyz)
++    sym, xyz = read_xyz(args.xyz)
++
++    # ---------------------------------------------------------------------
++    # 1.  Fragment definition & charge parsing
++    # ---------------------------------------------------------------------
++    frag_charges: List[int]
++    if args.fragments:
++        raw = json.loads(args.fragments.read_text())
++        # a) list[dict]  → {'atoms':[...], 'charge':q}
++        if (isinstance(raw, list)
++                and len(raw) > 0
++                and all(isinstance(f, dict) for f in raw)):
++            frags       = [f["atoms"]  for f in raw]
++            frag_charges = [int(f.get("charge", 0)) for f in raw]
++        # b) simple list[list[int]]
++        elif isinstance(raw, list) and all(isinstance(f, list) for f in raw):
++            frags        = raw
++            frag_charges = [0]*len(frags)
++        else:
++            raise Fatal("--fragments JSON must be a list of lists "
++                        "or a list of {'atoms','charge'} objects")
++    else:
++        frags        = detect_water_fragments(sym, xyz)
++        frag_charges = [0]*len(frags)
+
+@@ -60,7 +78,14 @@
+-        sel_atoms = [idx for frag_idx in combo for idx in frags[frag_idx]]
+-        write_orca_input(sym, xyz, sel_atoms, args.method, args.charge, args.multiplicity, inp)
++        sel_atoms  = [idx for frag_idx in combo for idx in frags[frag_idx]]
++
++        # -----------------------------------------------------------------
++        # 2.   Sub-system charge = sum of the constituent fragment charges
++        # -----------------------------------------------------------------
++        sub_charge = sum(frag_charges[frag_idx] for frag_idx in combo)
++
++        write_orca_input(sym, xyz, sel_atoms,
++                         args.method, sub_charge, args.multiplicity, inp)
