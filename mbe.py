@@ -142,7 +142,6 @@ def write_orca_input(sym, xyz, sel, method, charge, mult, path,
             fh.write(f"{sym[i]} {xyz[i,0]:.8f} {xyz[i,1]:.8f} {xyz[i,2]:.8f}\n")
         fh.write("*\n")
 
-
 def run_orca(inp: Path, timeout: int = 3600) -> float:
     """Run ORCA and return FINAL SINGLE POINT ENERGY (Hartree)."""
     out = inp.with_suffix("." + EXT["out"])
@@ -204,6 +203,33 @@ def parse_engrad_file(path: Path) -> np.ndarray:
             raise Fatal(f"Unexpected gradient entries in {path}")
         return np.array(gradients).reshape(natm, 3)
 
+def write_modified_pc_file(original_pc_file: Path, modified_pc_file: Path, exclude_fragments: List[List[int]]):
+    """
+    Create modified point-charge file excluding charges from atoms of selected fragment indices.
+    """
+    exclude_atoms = set()
+    for frag in exclude_fragments:
+        exclude_atoms.update(frag)
+    with original_pc_file.open() as fin, modified_pc_file.open("w") as fout:
+        lines = fin.readlines()
+        # First line is number of charges
+        n_charges = int(lines[0].strip())
+        filtered_lines = []
+        for idx, line in enumerate(lines[2:]):  # skip first line and comment line
+            parts = line.strip().split()
+            if len(parts) != 4:
+                continue  # skip malformed lines
+            q, x, y, z = parts
+            atom_index = idx  # charges are listed in order of atom indices
+            if atom_index in exclude_atoms:
+                continue  # skip this charge
+            filtered_lines.append(line)
+        # Write the new number of charges
+        fout.write(f"{len(filtered_lines)}\n")
+        # Write the remaining charges
+        for line in filtered_lines:
+            fout.write(line)
+
 
 ###############################################################################
 #                             MBE bookkeeping                                 #
@@ -263,7 +289,7 @@ def main(argv: Optional[Sequence[str]] = None):
                          "  • list[list[int]]                       -> charge 0 for every fragment\n"
                          "  • list[{\"atoms\": [...], \"charge\": q}] -> arbitrary charges"))
     p.add_argument("--orca-path", type=str, default=os.environ.get("ORCA_PATH", "orca"), help="Path to the ORCA executable")
-    p.add_argument("--ee", type=bool, default=False, help="Use electrostatic embedding (not implemented)")
+    p.add_argument("--ee", type=Path, help="Point-charge file of supersystem with which to perform electrostatic embedding")
 
     args = p.parse_args(argv)
 
@@ -277,12 +303,19 @@ def main(argv: Optional[Sequence[str]] = None):
     # 0.  Optional external point-charge array
     # ------------------------------------------------------------------
     pointcharge_file: Optional[Path] = None
+    ee_pointcharge_file: Optional[Path] = None
     if args.pointcharges:
         # quick sanity-check: header must be an int
         first = args.pointcharges.read_text().splitlines()[0].strip()
         if not first.isdigit():
             raise Fatal(f"{args.pointcharges}: first line must be an integer (#charges)")
         pointcharge_file = args.pointcharges
+    if args.ee:
+        # quick sanity-check: header must be an int
+        first = args.ee.read_text().splitlines()[0].strip()
+        if not first.isdigit():
+            raise Fatal(f"{args.ee}: first line must be an integer (#charges)")
+        ee_pointcharge_file = args.ee
 
     # ---------------------------------------------------------------------
     # 1.  Fragment definition & charge parsing
@@ -322,6 +355,13 @@ def main(argv: Optional[Sequence[str]] = None):
         subdir.mkdir(exist_ok=True)
         inp = subdir / f"frag.inp"
         sel_atoms  = [idx for frag_idx in combo for idx in frags[frag_idx]]
+        sub_pc_file = None
+        # use a local variable to avoid shadowing/assigning the outer pointcharge_file
+        pc_to_use = pointcharge_file
+        if ee_pointcharge_file:
+            sub_pc_file = subdir / "frag.pc"
+            write_modified_pc_file(ee_pointcharge_file, sub_pc_file, [frags[frag_idx] for frag_idx in combo])
+            pc_to_use = sub_pc_file
 
         # -----------------------------------------------------------------
         # 2.   Sub-system charge = sum of the constituent fragment charges
@@ -330,7 +370,7 @@ def main(argv: Optional[Sequence[str]] = None):
 
         write_orca_input(sym, xyz, sel_atoms,
                          args.method, sub_charge, args.multiplicity,
-                         inp, pointcharge_file)
+                         inp, pc_to_use)
         E = run_orca(inp)
         # parse fragment gradient
         eng = subdir / "frag.engrad"
