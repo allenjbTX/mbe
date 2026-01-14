@@ -215,9 +215,9 @@ def write_modified_pc_file(original_pc_file: Path, modified_pc_file: Path, exclu
         # First line is the original number of charges
         n_charges = int(lines[0].strip())
         filtered_lines = []
-        for idx, line in enumerate(lines[2:]):  # skip first line and comment line
+        for idx, line in enumerate(lines[1:]):  # skip first line
             parts = line.strip().split()
-            if len(parts) != 5:
+            if len(parts) != 4:
                 continue  # skip malformed lines
             sym, q, x, y, z = parts
             atom_index = idx  # charges are listed in order of atom indices
@@ -226,7 +226,6 @@ def write_modified_pc_file(original_pc_file: Path, modified_pc_file: Path, exclu
             filtered_lines.append(line)
         # Write the new number of charges
         fout.write(f"{len(filtered_lines)}\n")
-        fout.write(lines[1])  # write the original comment line
         # Write the remaining charges
         for line in filtered_lines:
             fout.write(line)
