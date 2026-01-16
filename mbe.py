@@ -123,7 +123,8 @@ ORCA_CMD = os.environ.get("ORCA_PATH", "orca")
 
 
 def write_orca_input(sym, xyz, sel, method, charge, mult, path,
-                     pointcharge_file: Optional[Path] = None):
+                     pointcharge_file: Optional[Path] = None,
+                     xtb_accuracy: Optional[int] = None):
     """Create ORCA *.inp file for selected fragment indices."""
     with path.open("w") as fh:
         fh.write(f"!{method} EnGrad\n")
@@ -134,7 +135,8 @@ def write_orca_input(sym, xyz, sel, method, charge, mult, path,
         if method.lower() in ['xtb0', 'xtb1', 'xtb2', 'gfn0-xtb', 'gfn1-xtb', 'gfn2-xtb']:
             fh.write("%xtb\n")
             fh.write("     etemp 0\n")
-            fh.write('     accuracy 1000\n')
+            if xtb_accuracy:
+                fh.write(f'     accuracy {xtb_accuracy}\n')
             fh.write('     xtbinputstring "--iterations 1000"\n')
             fh.write("end\n")
         fh.write(f"*xyz {charge} {mult}\n")
@@ -219,7 +221,7 @@ def write_modified_pc_file(original_pc_file: Path, modified_pc_file: Path, exclu
             parts = line.strip().split()
             if len(parts) != 4:
                 continue  # skip malformed lines
-            sym, q, x, y, z = parts
+            q, x, y, z = parts
             atom_index = idx  # charges are listed in order of atom indices
             if atom_index in exclude_atoms:
                 continue  # skip this charge
@@ -290,6 +292,8 @@ def main(argv: Optional[Sequence[str]] = None):
                          "  • list[{\"atoms\": [...], \"charge\": q}] -> arbitrary charges"))
     p.add_argument("--orca-path", type=str, default=os.environ.get("ORCA_PATH", "orca"), help="Path to the ORCA executable")
     p.add_argument("--ee", type=Path, help="Point-charge file of supersystem with which to perform electrostatic embedding")
+    p.add_argument("--xtb-accuracy", type=int, default=None,
+                   help="Accuracy setting for XTB calculations (only if using an XTB method)")
 
     args = p.parse_args(argv)
 
@@ -370,7 +374,8 @@ def main(argv: Optional[Sequence[str]] = None):
 
         write_orca_input(sym, xyz, sel_atoms,
                          args.method, sub_charge, args.multiplicity,
-                         inp, pc_to_use)
+                         inp, pc_to_use,
+                         xtb_accuracy=args.xtb_accuracy)
         E = run_orca(inp)
         # parse fragment gradient
         eng = subdir / "frag.engrad"
