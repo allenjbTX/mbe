@@ -294,6 +294,7 @@ def main(argv: Optional[Sequence[str]] = None):
     p.add_argument("--ee", type=Path, help="Point-charge file of supersystem with which to perform electrostatic embedding")
     p.add_argument("--xtb-accuracy", type=int, default=None,
                    help="Accuracy setting for XTB calculations (only if using an XTB method)")
+    p.add_argument("--cp", type=bool, default=False, help="Set True to use Boys-Bernardi counterpoise correction")
 
     args = p.parse_args(argv)
 
