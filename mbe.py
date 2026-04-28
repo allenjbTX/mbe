@@ -1,5 +1,5 @@
 """
-Many-Body Expansion (MBE) driver for ORCA
+Many-Body Expansion (MBE) wrapper for ORCA
 ==========================================
 
 A command-line tool to compute the traditional many-body expansion (MBE)

@@ -1,11 +1,11 @@
-# Many-Body Expansion (MBE) wrapper for DFTB+
+# Many-Body Expansion (MBE) wrapper
 
 Small command-line tool to compute the traditional Many-Body Expansion (MBE)
 energy and gradients of a molecular cluster using DFTB+ as the electronic
 structure back end.
 
 This repository contains a single main script, `mbe.py`, which automates
-fragment generation (for water clusters or from a JSON mask), runs DFTB+ jobs
+fragment generation (for water clusters or from a JSON mask), runs ORCA/DFTB+ jobs
 for every subsystem up to a requested MBE order, and assembles non-redundant
 MBE energies and gradients.
 
@@ -22,6 +22,7 @@ MBE energies and gradients.
 - Python 3.8 or newer
 - numpy
 - DFTB+
+- ORCA
 
 Install the minimal Python dependency with pip:
 
@@ -41,7 +42,7 @@ python mbe.py cluster.xyz --order 3 --method "ri-mp2 def2-svp" \
 Options of note:
 - `xyz` (positional): input cluster `.xyz` file
 - `--order` / `-n`: MBE order (default: 3)
-- `--method`: DFTB method
+- `--method`: ORCA/DFTB method
 - `--charge`, `--multiplicity`: whole-cluster charge and multiplicity
 - `--pointcharges`: optional point-charge file (plain text: first line =
   integer count; remaining lines = `q x y z`); the filename is forwarded to
@@ -67,7 +68,7 @@ python mbe.py cluster.xyz --order 2 --fragments frags.json
 - `_mbe_tmp/` (or the directory supplied with `--scratch`) — scratch
   subdirectories for each subsystem (e.g. `0_1_2/`)
 
-The script re-uses any existing DFTB+ `.out` files found in the scratch
+The script re-uses any existing output files found in the scratch
 subdirectories; if an `.out` exists but doesn't contain a final energy, the
 subsystem will be recomputed.
 
