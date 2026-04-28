@@ -45,19 +45,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Sequence, Tuple, Optional
+from modules import counterpoise
 
 import numpy as np
-
-################################################################################
-#                                 Utilities                                    #
-################################################################################
-
-EXT = {"xyz": "xyz", "inp": "inp", "out": "out"}
-
-
-class Fatal(RuntimeError):
-    """Unrecoverable error."""
-
 
 ###############################################################################
 #                         Geometry & Fragmentation                            #
@@ -124,11 +114,13 @@ ORCA_CMD = os.environ.get("ORCA_PATH", "orca")
 
 def write_orca_input(sym, xyz, sel, method, charge, mult, path,
                      pointcharge_file: Optional[Path] = None,
-                     xtb_accuracy: Optional[int] = None):
+                     xtb_accuracy: Optional[int] = None,
+                     cp_fragments: Optional[List[List[int]]] = None):
     """Create ORCA *.inp file for selected fragment indices."""
     with path.open("w") as fh:
-        fh.write(f"!{method} EnGrad\n")
+        fh.write(f"!{method} EnGrad NoAutoStart\n")
         fh.write("%pal nprocs 1 end\n")
+        fh.write("%scf maxiter 800 end\n")
         # fh.write("%maxcore 1500\n")
         if pointcharge_file:
             fh.write(f"%pointcharges \"{pointcharge_file.name}\"\n")
@@ -140,13 +132,16 @@ def write_orca_input(sym, xyz, sel, method, charge, mult, path,
             fh.write('     xtbinputstring "--iterations 1000"\n')
             fh.write("end\n")
         fh.write(f"*xyz {charge} {mult}\n")
-        for i in sel:
-            fh.write(f"{sym[i]} {xyz[i,0]:.8f} {xyz[i,1]:.8f} {xyz[i,2]:.8f}\n")
+        if cp_fragments:
+            counterpoise.write_cp_atoms(sym, xyz, fh, cp_fragments)
+        else:
+            for i in sel:
+                fh.write(f"{sym[i]} {xyz[i,0]:.8f} {xyz[i,1]:.8f} {xyz[i,2]:.8f}\n")
         fh.write("*\n")
 
-def run_orca(inp: Path, timeout: int = 3600) -> float:
+def run_orca(inp: Path) -> float:
     """Run ORCA and return FINAL SINGLE POINT ENERGY (Hartree)."""
-    out = inp.with_suffix("." + EXT["out"])
+    out = inp.with_suffix(".out")
     if out.exists():
         try:
             return parse_energy(out)
@@ -157,11 +152,7 @@ def run_orca(inp: Path, timeout: int = 3600) -> float:
     with out.open("w") as fh:
         with subprocess.Popen(cmd, cwd=inp.parent, stdout=fh,
                           stderr=subprocess.STDOUT, universal_newlines=True) as proc:
-            try:
-                proc.communicate(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                raise Fatal(f"ORCA job timeout: {inp}")
+            proc.communicate()
     return parse_energy(out)
 
 
@@ -232,7 +223,6 @@ def write_modified_pc_file(original_pc_file: Path, modified_pc_file: Path, exclu
         for line in filtered_lines:
             fout.write(line)
 
-
 ###############################################################################
 #                             MBE bookkeeping                                 #
 ###############################################################################
@@ -294,6 +284,8 @@ def main(argv: Optional[Sequence[str]] = None):
     p.add_argument("--ee", type=Path, help="Point-charge file of supersystem with which to perform electrostatic embedding")
     p.add_argument("--xtb-accuracy", type=int, default=None,
                    help="Accuracy setting for XTB calculations (only if using an XTB method)")
+    p.add_argument("--cp", type=bool, default=False,
+                   help="Set True to use Boys-Bernardi counterpoise correction. WARNING: breaks gradients.")
 
     args = p.parse_args(argv)
 
@@ -372,10 +364,17 @@ def main(argv: Optional[Sequence[str]] = None):
         # -----------------------------------------------------------------
         sub_charge = sum(frag_charges[frag_idx] for frag_idx in combo)
 
-        write_orca_input(sym, xyz, sel_atoms,
-                         args.method, sub_charge, args.multiplicity,
-                         inp, pc_to_use,
-                         xtb_accuracy=args.xtb_accuracy)
+        if args.cp:
+            write_orca_input(sym, xyz, sel_atoms,
+                            args.method, sub_charge, args.multiplicity,
+                            inp, pc_to_use,
+                            xtb_accuracy=args.xtb_accuracy,
+                            cp_fragments=[frags[frag_idx] for frag_idx in combo])
+        else:
+            write_orca_input(sym, xyz, sel_atoms,
+                            args.method, sub_charge, args.multiplicity,
+                            inp, pc_to_use,
+                            xtb_accuracy=args.xtb_accuracy)
         E = run_orca(inp)
         # parse fragment gradient
         eng = subdir / "frag.engrad"
