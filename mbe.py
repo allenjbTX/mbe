@@ -59,7 +59,7 @@ def read_xyz(path: Path) -> Tuple[List[str], np.ndarray]:
         try:
             natm = int(f.readline())
         except ValueError:
-            raise Fatal("First line must contain number of atoms")
+            raise RuntimeError("First line must contain number of atoms")
         _ = f.readline()  # comment
         symbols, xyz = [], []
         for line in f:
@@ -67,11 +67,11 @@ def read_xyz(path: Path) -> Tuple[List[str], np.ndarray]:
                 continue
             parts = line.split()
             if len(parts) < 4:
-                raise Fatal("Malformed XYZ line: " + line)
+                raise RuntimeError("Malformed XYZ line: " + line)
             symbols.append(parts[0])
             xyz.append([float(x) for x in parts[1:4]])
         if len(symbols) != natm:
-            raise Fatal(f"Expected {natm} atoms, found {len(symbols)}")
+            raise RuntimeError(f"Expected {natm} atoms, found {len(symbols)}")
         return symbols, np.array(xyz)
 
 
@@ -90,9 +90,9 @@ def detect_water_fragments(symbols: List[str], xyz: np.ndarray) -> List[List[int
         # H atoms swapped relative to the original XYZ ordering.
         hs = sorted(hs)
         if len(hs) != 2:
-            raise Fatal("Failed to assign two H atoms to oxygen {}".format(o))
+            raise RuntimeError("Failed to assign two H atoms to oxygen {}".format(o))
         if any(h in taken for h in hs):
-            raise Fatal("Hydrogen assigned to multiple waters; check geometry")
+            raise RuntimeError("Hydrogen assigned to multiple waters; check geometry")
         taken.update(hs)
         frags.append([o] + hs)
     return frags
@@ -145,7 +145,7 @@ def run_orca(inp: Path) -> float:
     if out.exists():
         try:
             return parse_energy(out)
-        except Fatal:
+        except RuntimeError:
             print(f"[recompute] Energy not found in {out}")
     cmd = [ORCA_CMD, inp.name]
     # redirect ORCA stdout into the .out file so parse_energy can find it
@@ -162,7 +162,7 @@ def parse_energy(out_path: Path) -> float:
         for line in f:
             if "FINAL SINGLE POINT ENERGY" in line:
                 return float(line.split()[-1])
-    raise Fatal("Energy line not found in {}".format(out_path))
+    raise RuntimeError("Energy line not found in {}".format(out_path))
 
 
 def parse_engrad_file(path: Path) -> np.ndarray:
@@ -181,7 +181,7 @@ def parse_engrad_file(path: Path) -> np.ndarray:
                         break
                 break
         if natm is None:
-            raise Fatal(f"Cannot find atom count in {path}")
+            raise RuntimeError(f"Cannot find atom count in {path}")
         # find gradient block
         for line in f:
             if "current gradient" in line:
@@ -193,7 +193,7 @@ def parse_engrad_file(path: Path) -> np.ndarray:
                         gradients.append(float(line3.strip()))
                 break
         if len(gradients) != 3 * natm:
-            raise Fatal(f"Unexpected gradient entries in {path}")
+            raise RuntimeError(f"Unexpected gradient entries in {path}")
         return np.array(gradients).reshape(natm, 3)
 
 def write_modified_pc_file(original_pc_file: Path, modified_pc_file: Path, exclude_fragments: List[List[int]]):
@@ -304,13 +304,13 @@ def main(argv: Optional[Sequence[str]] = None):
         # quick sanity-check: header must be an int
         first = args.pointcharges.read_text().splitlines()[0].strip()
         if not first.isdigit():
-            raise Fatal(f"{args.pointcharges}: first line must be an integer (#charges)")
+            raise RuntimeError(f"{args.pointcharges}: first line must be an integer (#charges)")
         pointcharge_file = args.pointcharges
     if args.ee:
         # quick sanity-check: header must be an int
         first = args.ee.read_text().splitlines()[0].strip()
         if not first.isdigit():
-            raise Fatal(f"{args.ee}: first line must be an integer (#charges)")
+            raise RuntimeError(f"{args.ee}: first line must be an integer (#charges)")
         ee_pointcharge_file = args.ee
 
     # ---------------------------------------------------------------------
@@ -330,14 +330,14 @@ def main(argv: Optional[Sequence[str]] = None):
             frags        = raw
             frag_charges = [0]*len(frags)
         else:
-            raise Fatal("--fragments JSON must be a list of lists "
+            raise RuntimeError("--fragments JSON must be a list of lists "
                         "or a list of {'atoms','charge'} objects")
     else:
         frags        = detect_water_fragments(sym, xyz)
         frag_charges = [0]*len(frags)
     n_frag = len(frags)
     if args.order > n_frag:
-        raise Fatal("MBE order cannot exceed number of fragments")
+        raise RuntimeError("MBE order cannot exceed number of fragments")
 
     workdir = args.scratch.resolve()
     workdir.mkdir(exist_ok=True, parents=True)
@@ -447,6 +447,6 @@ def main(argv: Optional[Sequence[str]] = None):
 if __name__ == "__main__":
     try:
         main()
-    except Fatal as e:
+    except RuntimeError as e:
         print("ERROR:", e, file=sys.stderr)
         sys.exit(1)
