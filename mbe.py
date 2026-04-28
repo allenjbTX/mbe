@@ -49,16 +49,6 @@ from modules import counterpoise
 
 import numpy as np
 
-################################################################################
-#                                 Utilities                                    #
-################################################################################
-
-EXT = {"xyz": "xyz", "inp": "inp", "out": "out"}
-
-
-class Fatal(RuntimeError):
-    """Unrecoverable error."""
-
 ###############################################################################
 #                         Geometry & Fragmentation                            #
 ###############################################################################
@@ -128,8 +118,9 @@ def write_orca_input(sym, xyz, sel, method, charge, mult, path,
                      cp_fragments: Optional[List[List[int]]] = None):
     """Create ORCA *.inp file for selected fragment indices."""
     with path.open("w") as fh:
-        fh.write(f"!{method} EnGrad\n")
+        fh.write(f"!{method} EnGrad NoAutoStart\n")
         fh.write("%pal nprocs 1 end\n")
+        fh.write("%scf maxiter 800 end\n")
         # fh.write("%maxcore 1500\n")
         if pointcharge_file:
             fh.write(f"%pointcharges \"{pointcharge_file.name}\"\n")
@@ -150,7 +141,7 @@ def write_orca_input(sym, xyz, sel, method, charge, mult, path,
 
 def run_orca(inp: Path) -> float:
     """Run ORCA and return FINAL SINGLE POINT ENERGY (Hartree)."""
-    out = inp.with_suffix("." + EXT["out"])
+    out = inp.with_suffix(".out")
     if out.exists():
         try:
             return parse_energy(out)
